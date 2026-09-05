@@ -1,0 +1,6 @@
+.env
+bin/
+*.log
+logs/
+tmp/
+CLAUDE.md
