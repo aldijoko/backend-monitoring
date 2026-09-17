@@ -1,0 +1,48 @@
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = []
+  bin = "./tmp/main"
+  cmd = "go build -o ./tmp/main cmd/api/main.go"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor", "migrations", "mediamtx", "scripts", ".git"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = []
+  include_ext = ["go", "yaml", "yml", "env"]
+  include_file = []
+  kill_delay = "0s"
+  log = "build-errors.log"
+  # inotify events don't reliably cross the Docker Desktop bind-mount
+  # boundary on Windows (confirmed: an edit sat unpicked-up for minutes with
+  # poll=false) — polling is required here, unlike backend-cpma's .air.toml
+  # (written for a native Linux/macOS bind mount, where inotify works fine).
+  poll = true
+  poll_interval = 1000
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = false
+  stop_on_root = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

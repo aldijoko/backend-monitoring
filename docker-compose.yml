@@ -1,0 +1,87 @@
+# Local dev: runs the Go API (hot-reload via air) and mediamtx together in
+# Docker, connecting to the Postgres database that already lives inside the
+# `bnpt-cpma-postgres` container (started separately by the sibling
+# backend-cpma project's own docker-compose, at ../../cpma/backend-cpma
+# relative to this repo's parent). This repo deliberately does NOT run its
+# own Postgres container — see CLAUDE.md's "Local dev prerequisites".
+#
+# Usage:
+#   1. Make sure bnpt-cpma-postgres is running (from the backend-cpma repo):
+#        docker start bnpt-cpma-postgres
+#      (its network, backend-cpma_bnpt-cpma-network, must already exist —
+#      it does as long as that project's compose has been run at least once)
+#   2. cp .env.example .env   (first time only)
+#   3. docker compose up --build
+#
+# The frontend (monitoring-cctv repo) is NOT part of this compose — it's run
+# natively via `npm run dev`, whose Vite dev server proxies /api/* to
+# http://localhost:8000, which this compose publishes below.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      # Overrides .env's DB_HOST=localhost, which targets native (non-docker)
+      # dev — see config/config.go for how these are read. MEDIAMTX_* need no
+      # override: mediamtx shares this container's network namespace (see
+      # below), so .env's http://localhost:9997 / :8888 defaults already
+      # point at the right place, both from this container and from the
+      # browser on the host.
+      DB_HOST: postgres
+      DB_PORT: 5432
+    ports:
+      - "${APP_PORT:-8000}:8000"
+      # mediamtx's ports, published here because it shares this service's
+      # network namespace (network_mode: service:api below) — only the
+      # protocols this app actually uses (RTSP pull/test-publish, HLS
+      # playback, control API). mediamtx.yml also enables webrtc/srt/rtmp/moq
+      # (template defaults) but nothing in this codebase uses them.
+      - "8554:8554" # RTSP
+      - "8100:8100/udp" # RTP
+      - "8101:8101/udp" # RTCP
+      - "8888:8888" # HLS (consumed directly by the browser via StreamPlayer)
+      - "9997:9997" # control API (RegisterPath/UpdatePath/status polling)
+    volumes:
+      - .:/app
+      - api_go_mod_cache:/go/pkg/mod
+      - api_go_build_cache:/root/.cache/go-build
+    networks:
+      - default
+      - bnpt-cpma-network
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    # Shares the `api` container's network namespace instead of joining
+    # `default` on its own IP. mediamtx.yml only allows its control API
+    # (action: api) from loopback (127.0.0.1/::1) with no auth — the Go API
+    # calls it unauthenticated (see internal/service/mediamtx_service.go), so
+    # that call must genuinely originate from localhost. On a normal bridge
+    # network the api container's traffic would arrive from its own
+    # non-loopback IP and get rejected; sharing the namespace makes
+    # `http://localhost:9997` from inside `api` actually be loopback, so
+    # mediamtx.yml's existing IP allowlist doesn't need to be loosened.
+    # Consequence: mediamtx has no ports/networks of its own — see `api`'s
+    # `ports:` above, and it starts after `api` (needs its netns to exist).
+    network_mode: "service:api"
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - ./mediamtx/auto.crt:/auto.crt:ro
+      - ./mediamtx/auto.key:/auto.key:ro
+    depends_on:
+      - api
+
+volumes:
+  api_go_mod_cache:
+  api_go_build_cache:
+
+networks:
+  default:
+    name: cctv-network
+  bnpt-cpma-network:
+    external: true
+    name: backend-cpma_bnpt-cpma-network

@@ -60,6 +60,19 @@ func pathBody(cfg PathConfig) map[string]any {
 		"source":         cfg.Source,
 		"rtspTransport":  cfg.RtspTransport,
 		"sourceOnDemand": cfg.SourceOnDemand,
+		// Every camera here is a pulled external/public feed (government ATCS
+		// HLS streams, eventually real RTSP cameras over the internet) that
+		// can drop and reconnect on its own — without this, a reader just
+		// sees a black tile with no signal while that's happening,
+		// indistinguishable from "still loading". alwaysAvailable can only be
+		// set per concrete path, not in mediamtx.yml's pathDefaults (mediamtx
+		// refuses to start: "'alwaysAvailable' cannot be used in a path with
+		// a regular expression"), which is why it's set here instead, on
+		// every path this service registers.
+		"alwaysAvailable": true,
+		"alwaysAvailableTracks": []map[string]string{
+			{"codec": "H264"},
+		},
 	}
 }
 
@@ -71,13 +84,20 @@ func (m *MediaMTXService) RegisterPath(cameraID uint, cfg PathConfig) (string, e
 	return m.streamURL(cameraID), nil
 }
 
+// UpdatePath deletes and re-adds the path instead of calling mediamtx's
+// PATCH /v3/config/paths/patch/{name}. That was tried first and is what the
+// mediamtx docs suggest, but reproduced reliably (not a one-off) against
+// these pulled HLS sources with hlsAlwaysRemux: true: PATCH updates the
+// path's config in place but its HLS muxer gets left stuck reporting "muxer
+// is waiting to be created" (HTTP 500 on every read) and never actually
+// recreated — while delete-then-add consistently works. Ignoring the delete
+// error is deliberate: it 404s (harmless) whenever the path doesn't exist
+// yet, e.g. a camera PATCHed before mediamtx was ever wired up.
 func (m *MediaMTXService) UpdatePath(cameraID uint, cfg PathConfig) (string, error) {
 	name := pathName(cameraID)
-	if err := m.do(http.MethodPatch, "/v3/config/paths/patch/"+name, pathBody(cfg)); err != nil {
-		// path may not exist yet (e.g. created before mediamtx was wired up) — fall back to add
-		if err2 := m.do(http.MethodPost, "/v3/config/paths/add/"+name, pathBody(cfg)); err2 != nil {
-			return "", err
-		}
+	_ = m.do(http.MethodDelete, "/v3/config/paths/delete/"+name, nil)
+	if err := m.do(http.MethodPost, "/v3/config/paths/add/"+name, pathBody(cfg)); err != nil {
+		return "", err
 	}
 	return m.streamURL(cameraID), nil
 }

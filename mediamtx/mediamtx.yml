@@ -333,7 +333,15 @@ hlsAllowOrigins: ["*"]
 hlsTrustedProxies: []
 # By default, HLS is generated only when requested by a user.
 # This option allows to generate it always, avoiding the delay between request and generation.
-hlsAlwaysRemux: false
+#
+# true: this is a live monitoring grid, not occasional single-camera viewing —
+# most/all cameras are expected to have a viewer most of the time, so an
+# on-demand muxer buys little (it would just get created almost immediately
+# anyway) while costing a multi-second black tile every time the grid is
+# (re)opened or a viewer navigates back to it. mediamtx doesn't transcode
+# (H264 passthrough remux only), so keeping muxers warm for every camera is
+# cheap — negligible CPU, no re-encoding.
+hlsAlwaysRemux: true
 # Variant of the HLS protocol to use. Available options are:
 # * mpegts - uses MPEG-TS segments, for maximum compatibility.
 # * fmp4 - uses fragmented MP4 segments, more efficient.
@@ -521,6 +529,17 @@ pathDefaults:
   # Default path settings -> Always available
 
   # Enable always-available mode, in which an offline segment is played on repeat when the stream is not available.
+  #
+  # NOT set here: mediamtx rejects 'alwaysAvailable' in pathDefaults (or any
+  # path using a regex, including the 'all_others' catch-all below) with
+  # "'alwaysAvailable' cannot be used in a path with a regular expression" —
+  # confirmed by trying it (mediamtx refused to start). Since every camera
+  # path here is registered dynamically per-camera via the runtime config API
+  # (CameraService -> internal/service/mediamtx_service.go, path name
+  # `camera-{id}`, not a static entry under `paths:` below), alwaysAvailable
+  # is instead set per-path in that Go code's path-config payload — see
+  # PathConfig/pathBody() in mediamtx_service.go — which applies to each
+  # concrete `camera-N` path individually rather than via a regex default.
   alwaysAvailable: false
   # Tracks of the default offline segment.
   alwaysAvailableTracks: []
